@@ -1,0 +1,259 @@
+<!-- RetailCo Invoice Tax Automation POC
+     Single-file HTML + JS demo that simulates an inbox, invoice extraction,
+     rule-based tax classification, tax calculation, and output JSON/table.
+
+     How to use:
+     - Click an invoice on the left "Inbox" to preview
+     - Click "Process Invoice" to run extraction, classification, tax calc
+     - Use the "Post to Accounting (simulate)" button to simulate API update
+
+     This is a lightweight front-end proof-of-concept for demo / slides.
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RetailCo Invoice POC</title>
+  <style>
+    :root{font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;}
+    body{margin:0;background:#0f1724;color:#e6eef8}
+    .container{display:flex;gap:16px;padding:20px}
+    .panel{background:#0b1220;border:1px solid #142030;border-radius:8px;padding:12px;flex:1}
+    .inbox{width:280px;flex:0 0 280px}
+    h2{font-size:16px;margin:6px 0 12px}
+    .invoice-row{padding:10px;border-radius:6px;margin-bottom:8px;background:linear-gradient(180deg,#08121a, #07131a);cursor:pointer}
+    .invoice-row:hover{outline:1px solid #1f6feb}
+    .invoice-meta{font-size:12px;color:#9fb4d6}
+    pre{background:#071025;padding:10px;border-radius:6px;overflow:auto;color:#cfe8ff}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:6px;border-bottom:1px solid #132233;font-size:13px}
+    .btn{background:#1f6feb;color:white;padding:8px 12px;border:none;border-radius:6px;cursor:pointer}
+    .btn:active{transform:translateY(1px)}
+    .flex{display:flex;gap:8px;align-items:center}
+    .tag{background:#122938;padding:4px 8px;border-radius:6px;font-size:12px}
+    .output-json{white-space:pre-wrap;font-family:monospace;font-size:12px}
+    .success{color:#6ae36a}
+    .warning{color:#ffb86b}
+    .muted{color:#7b98b8;font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Inbox panel -->
+    <div class="panel inbox">
+      <h2>Inbox</h2>
+      <div id="inboxList"></div>
+      <div class="muted" style="margin-top:10px;font-size:13px">Click an invoice to preview, then press <strong>Process Invoice</strong>.</div>
+    </div>
+
+    <!-- Preview & actions -->
+    <div class="panel" style="flex:1.3">
+      <h2>Invoice Preview</h2>
+      <div id="previewArea">Select an invoice from the inbox.</div>
+      <div style="margin-top:12px" class="flex">
+        <button id="processBtn" class="btn">Process Invoice</button>
+        <button id="postBtn" class="btn" style="background:#0ea5a5">Post to Accounting (simulate)</button>
+        <div id="status" style="margin-left:auto;align-self:center" class="muted">Status: <span id="statusText">idle</span></div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="panel" style="flex:1.4">
+      <h2>Processed Output</h2>
+      <div id="resultsArea"><div class="muted">No results yet.</div></div>
+    </div>
+  </div>
+
+  <script>
+  // === Sample invoices (two provided examples simplified) ===
+  const invoices = [
+    {
+      id: '25-12232', vendor: 'Alpha Imports', date: '2025-10-05', total: 7254.67,
+      lines: [
+        {desc: 'Seedless Red Grapes - 2 lb Clamshell', qty:150, price:5.49},
+        {desc: 'Navel Oranges - 4 lb Bag', qty:300, price:6.49},
+        {desc: 'Hass Avocados - 4 Count Bag', qty:100, price:5.99},
+        {desc: 'Roma Tomatoes - 2 lb Bag', qty:305, price:3.29},
+        {desc: 'Baby Carrots - 2 lb Bag', qty:40, price:2.99},
+        {desc: 'Fresh Broccoli crowns - 1 lb', qty:340, price:2.49},
+        {desc: 'Iceberg Lettuce - Each Head', qty:230, price:1.79},
+        {desc: 'Chobani Greek Yogurt - 4 Count Variety Pack', qty:90, price:6.49},
+        {desc: 'Philadelphia Original Cream Cheese - 8 oz', qty:88, price:3.49},
+        {desc: "Pepperidge Farm Whole Grain Bread - 24 oz Loaf", qty:30, price:4.29},
+        {desc: 'Arnold Country White Bread - 24 oz Loaf', qty:80, price:3.99},
+        {desc: "King's Hawaiian Sweet Rolls - 12 Count", qty:30, price:5.49}
+      ]
+    },
+    {
+      id: '25-15886', vendor:'BetaShipping', date:'2025-10-08', total:7477.81,
+      lines:[
+        {desc: "Jack Daniel’s Tennessee Whiskey – 750 ml Bottle", qty:4, price:28.99},
+        {desc: "Marlboro Gold Cigarettes – Carton (10 Packs)", qty:34, price:89.99},
+        {desc: "Camel Blue Cigarettes – Carton (10 Packs)", qty:25, price:87.99},
+        {desc: "Copenhagen Long Cut – 5 Cans", qty:26, price:38.49},
+        {desc: "Perdue Ground Chicken – 1 lb", qty:40, price:6.49},
+        {desc: "Jennie-O Lean Ground Turkey – 1 lb", qty:14, price:6.99},
+        {desc: "Oscar Mayer Bacon – 16 oz Pack", qty:45, price:8.49},
+        {desc: "Hormel Chili with Beans – 15 oz Can", qty:32, price:2.99},
+        {desc: "Chef Boyardee Beef Ravioli – 15 oz Can", qty:14, price:2.49},
+        {desc: "Goya Black Beans – 15.5 oz Can", qty:28, price:1.99},
+        {desc: "Heinz Tomato Ketchup – 38 oz Bottle", qty:21, price:5.49},
+        {desc: "French’s Classic Yellow Mustard – 20 oz Bottle", qty:16, price:3.79}
+      ]
+    }
+  ];
+
+  // === Tax rate table (partial, based on the file you uploaded) ===
+  const TAX_RATES = {
+    'Fresh Produce': 0,
+    'Dairy Products': 0,
+    'Bakery Items': 0,
+    'Packaged Snacks': 4,
+    'Bottled Water': 0,
+    'Soft Drinks': 6.5,
+    'Coffee & Tea': 4,
+    'Frozen Meals': 4,
+    'Canned Goods': 4,
+    'Condiments & Sauces': 6,
+    'Meat & Poultry': 0,
+    'Seafood': 0,
+    'Alcoholic Beverages': 10,
+    'Tobacco Products': 12,
+    'Over-the-Counter Medicine':4,
+    'Vitamins & Supplements':4
+    // ...add more as needed for demo
+  };
+
+  // Simple rule-based classifier (substring checks). In real system use LLM or full taxonomy.
+  function classifyTax(description){
+    const d = description.toLowerCase();
+    if(d.includes('grape') || d.includes('orange') || d.includes('avocado') || d.includes('tomato') || d.includes('carrot') || d.includes('broccoli') || d.includes('lettuce')) return 'Fresh Produce';
+    if(d.includes('yogurt') || d.includes('cream cheese') || d.includes('cheese')) return 'Dairy Products';
+    if(d.includes('bread') || d.includes('roll') || d.includes('buns')) return 'Bakery Items';
+    if(d.includes('whiskey') || d.includes('wine') || d.includes('vodka') || d.includes('beer')) return 'Alcoholic Beverages';
+    if(d.includes('cigarette') || d.includes('marlboro') || d.includes('camel') || d.includes('tobacco') || d.includes('copenhagen')) return 'Tobacco Products';
+    if(d.includes('chili') || d.includes('beans') || d.includes('ravioli') || d.includes('ketchup') || d.includes('mustard') || d.includes('sauce')) return 'Canned Goods';
+    if(d.includes('bacon') || d.includes('chicken') || d.includes('turkey') || d.includes('ground')) return 'Meat & Poultry';
+    // fallback
+    return 'Packaged Snacks';
+  }
+
+  // UI wiring
+  const inboxList = document.getElementById('inboxList');
+  const previewArea = document.getElementById('previewArea');
+  const resultsArea = document.getElementById('resultsArea');
+  const processBtn = document.getElementById('processBtn');
+  const postBtn = document.getElementById('postBtn');
+  const statusText = document.getElementById('statusText');
+
+  let selectedInvoice = null;
+  let lastProcessed = null;
+
+  function renderInbox(){
+    inboxList.innerHTML = '';
+    invoices.forEach(inv=>{
+      const div = document.createElement('div');
+      div.className = 'invoice-row';
+      div.innerHTML = `<strong>${inv.vendor}</strong><div class="invoice-meta">#${inv.id} • ${inv.date} • $${inv.total.toFixed(2)}</div>`;
+      div.onclick = ()=>{ selectInvoice(inv.id); };
+      inboxList.appendChild(div);
+    });
+  }
+
+  function selectInvoice(id){
+    selectedInvoice = invoices.find(i=>i.id===id);
+    previewArea.innerHTML = invoicePreviewHtml(selectedInvoice);
+    resultsArea.innerHTML = '<div class="muted">Not processed yet.</div>';
+    statusText.textContent = 'ready to process';
+  }
+
+  function invoicePreviewHtml(inv){
+    let html = `<div class="flex" style="justify-content:space-between"><div><strong>${inv.vendor}</strong><div class='muted'>Invoice #${inv.id} • ${inv.date}</div></div><div class='tag'>$${inv.total.toFixed(2)}</div></div>`;
+    html += '<hr style="border-color:#122233;margin:8px 0">';
+    html += '<table><thead><tr><th>Qty</th><th>Description</th><th>Price</th><th>Amount</th></tr></thead><tbody>';
+    inv.lines.forEach(line=>{
+      const amt = (line.qty * line.price).toFixed(2);
+      html += `<tr><td>${line.qty}</td><td>${line.desc}</td><td>$${line.price.toFixed(2)}</td><td>$${amt}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    return html;
+  }
+
+  // Process invoice: extract, classify, calc
+  function processInvoice(){
+    if(!selectedInvoice){ alert('Pick an invoice first'); return; }
+    statusText.textContent = 'processing...';
+
+    // Simulate extraction (we already have structured lines)
+    const processedLines = selectedInvoice.lines.map(line=>{
+      const category = classifyTax(line.desc);
+      const rate = TAX_RATES[category] ?? 0;
+      const lineAmount = line.qty * line.price;
+      const taxAmount = +(lineAmount * (rate/100));
+      const total = lineAmount + taxAmount;
+      return {
+        description: line.desc,
+        quantity: line.qty,
+        unit_price: line.price,
+        line_amount: +lineAmount.toFixed(2),
+        tax_category: category,
+        tax_rate: rate,
+        tax_amount: +taxAmount.toFixed(2),
+        total_amount: +total.toFixed(2)
+      };
+    });
+
+    const invoicePayload = {
+      invoice_id: selectedInvoice.id,
+      vendor: selectedInvoice.vendor,
+      date: selectedInvoice.date,
+      subtotal: +selectedInvoice.lines.reduce((s,l)=>s+(l.qty*l.price),0).toFixed(2),
+      total_tax: +processedLines.reduce((s,l)=>s+l.tax_amount,0).toFixed(2),
+      total: +processedLines.reduce((s,l)=>s+l.total_amount,0).toFixed(2),
+      lines: processedLines
+    };
+
+    lastProcessed = invoicePayload;
+    renderResults(invoicePayload);
+    statusText.textContent = 'processed';
+  }
+
+  function renderResults(payload){
+    let html = `<div class='muted'>Invoice ID: <strong>${payload.invoice_id}</strong> • Vendor: ${payload.vendor}</div>`;
+    html += '<hr style="border-color:#122233;margin:8px 0">';
+    html += '<table><thead><tr><th>Qty</th><th>Description</th><th>Unit</th><th>Line</th><th>Category</th><th>Rate %</th><th>Tax</th><th>Total</th></tr></thead><tbody>';
+    payload.lines.forEach(l=>{
+      html += `<tr><td>${l.quantity}</td><td>${l.description}</td><td>$${l.unit_price.toFixed(2)}</td><td>$${l.line_amount.toFixed(2)}</td><td>${l.tax_category}</td><td>${l.tax_rate}</td><td>$${l.tax_amount.toFixed(2)}</td><td>$${l.total_amount.toFixed(2)}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+    html += `<div style="margin-top:10px" class='flex'><div class='tag'>Subtotal: $${payload.subtotal.toFixed(2)}</div><div class='tag'>Tax: $${payload.total_tax.toFixed(2)}</div><div class='tag'>Total: $${payload.total.toFixed(2)}</div></div>`;
+
+    html += '<hr style="border-color:#122233;margin:8px 0">';
+    html += '<div><strong>JSON Output</strong></div>';
+    html += `<pre class='output-json'>${JSON.stringify(payload, null, 2)}</pre>`;
+
+    resultsArea.innerHTML = html;
+  }
+
+  // Simulate posting to accounting via API
+  function postToAccounting(){
+    if(!lastProcessed){ alert('Process an invoice first'); return; }
+    statusText.textContent = 'posting to accounting...';
+    // simulate async API call
+    setTimeout(()=>{
+      statusText.textContent = 'posted ✓';
+      alert('Simulated: invoice posted to accounting system (no real network call)');
+    },800);
+  }
+
+  // Hook up buttons
+  processBtn.addEventListener('click', processInvoice);
+  postBtn.addEventListener('click', postToAccounting);
+
+  // Initialize
+  renderInbox();
+  </script>
+</body>
+</html>
